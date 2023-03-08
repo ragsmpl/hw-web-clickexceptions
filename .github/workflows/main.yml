@@ -1,0 +1,14 @@
+name: Build and Deploy
+
+on: [push]
+
+jobs:
+  development:
+    uses:  ./.github/workflows/npmbuil.yml
+    with:
+      NPM_BUILD_ENVIRONMENT: development
+      WORKING_DIR: ./hw-exceptions
+      DOCKER_IMAGENAME: hw-web-exceptions
+      DOCKERFILE_PATH: ./hw-exceptions
+      NODE_VERSION: "14.x"
+    secrets: inherit
