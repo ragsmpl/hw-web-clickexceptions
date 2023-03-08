@@ -7,8 +7,8 @@ jobs:
     uses:  ./.github/workflows/npmbuil.yml
     with:
       NPM_BUILD_ENVIRONMENT: development
-      WORKING_DIR: ./hw-exceptions
-      DOCKER_IMAGENAME: hw-web-exceptions
-      DOCKERFILE_PATH: ./hw-exceptions
+      WORKING_DIR: ./hw-clickexceptions
+      DOCKER_IMAGENAME: hw-web-clickexceptions
+      DOCKERFILE_PATH: ./hw-clickexceptions
       NODE_VERSION: "14.x"
     secrets: inherit
