@@ -140,12 +140,12 @@ jobs:
         uses: docker/build-push-action@v4
         if: ${{ env.IS_RELEASE != 'true' }}
         with:
-          context: hw-exceptions
+          context: .
           username: ${{ secrets.JFROG_USER }}
           password: ${{ secrets.JFROG_KEY }}
           registry: "mycompany-docker-dev.jfrog.io"
           #repository: hw/${{ inputs.DOCKER_IMAGENAME}}
-          file: ${{ inputs.DOCKERFILE_PATH }}/Dockerfile
+          file: hw-clickexceptions/Dockerfile
           #secrets: |
            # "github_token=${{ secrets.GITHUB_TOKEN }}"
           push: true
