@@ -1,0 +1,207 @@
+
+name: NPM build reusable workflow
+
+on:
+  workflow_call:
+    inputs:
+      WORKING_DIR:
+        type: string
+        description: "Directory that the workflow runs in"
+        default: ./
+        required: false
+      NODE_VERSION:
+        type: string
+        description: "Version of node.js to use"
+        required: true
+      NPM_REPO:
+        type: string
+        description: "Node package manager registry url"
+        default: "https://mycompany.jfrog.io/artifactory/api/npm/npm-repo"
+        required: false
+      NPM_AUTH:
+        type: string
+        description: "Auth token url for npm repo"
+        default: "https://mycompany.jfrog.io/artifactory/api/npm/auth"
+        required: false
+      NPM_TEST_SCRIPT:
+        type: string
+        description: "The npm script from the package.json to execute as part of the automated build"
+        default: "test"
+        required: false
+      DOCKERFILE_PATH:
+        type: string
+        description: "Path to Dockerfile"
+        default: ./
+        required: false
+      NPM_BUILD_ENVIRONMENT:
+        type: string
+        description: "NPM Build Environment"
+        required: true
+      DOCKER_IMAGENAME:
+        type: string
+        description: "Docker Image Name"
+        required: true
+    outputs:
+      TAG:
+        description: "Docker tag equivalent to the input RELEASE_VERSION without the prepended 'v'"
+        value: ${{ jobs.build.outputs.TAG }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_REGISTRY_DEV: "mycompany-docker-dev.jfrog.io"
+  DOCKER_REGISTRY_PROD: "mycompany-docker-prod.jfrog.io"
+  DOCKER_REMOTE_REGISTRY: "mycompany-docker-remote.jfrog.io"
+  DOCKER_REMOTE_ARTIFACTORY_EDGE_DEV: "docker-dev.artifactory-edge.mycompany.com"
+  DOCKER_REMOTE_ARTIFACTORY_EDGE_PROD: "docker-prod.artifactory-edge.mycompany.com"
+  DOCKER_REMOTE_ARTIFACTORY_EDGE_REMOTE: "docker-remote.artifactory-edge.mycompany.com"
+
+jobs:
+  build:
+    name: Build node applications
+    runs-on: ubuntu-latest
+    container:
+      image: kasmweb/chromium:1.12.0
+      options: --user root
+    defaults:
+      run:
+        shell: bash --noprofile --norc -o pipefail {0}
+        working-directory: ${{ inputs.WORKING_DIR }}
+    outputs:
+      TAG: ${{ steps.build-tag.outputs.TAG }}
+    steps:
+#### START - needed to be able to source external docker repositories ####
+      
+      - uses: actions/checkout@v3
+      - name: Setup docker CLI
+        run: |
+          mkdir -p "$HOME/tmp/"
+          cd "$HOME/tmp/"
+          curl https://download.docker.com/linux/static/stable/x86_64/docker-20.10.2.tgz | tar xz
+          cp ./docker/docker /usr/bin/ && rm -rf docker && docker version
+      - name: "create Symbolic link for '$HOME/bin/docker'"
+        run: |
+          mkdir -p "$HOME/bin/"
+          ln -sf /usr/bin/docker "$HOME/bin/docker"
+
+
+
+
+#### END ####
+
+      - uses: actions/checkout@v3
+
+      - name: Set IS_RELEASE var if release trigger
+        if: github.event_name == 'release'
+        run: echo "IS_RELEASE=true" >> $GITHUB_ENV
+
+      - name: Setup Node ${{ inputs.NODE_VERSION }} Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: NPM install
+        run: |
+          npm install
+          npm i -D puppeteer
+          npm install -g --force nodemon
+          npm install -g grunt-cli && npm install -g grunt
+
+      - name: NPM test
+        env:
+          NPM_TEST_SCRIPT: ${{ inputs.NPM_TEST_SCRIPT }}
+        run: |
+          npm run ${{ env.NPM_TEST_SCRIPT }}
+
+      - name: NPM build DEV
+        if: ${{ env.IS_RELEASE != 'true' }}
+        run: |
+          npm run build &
+
+      - name: NPM build PROD
+        if: ${{ env.IS_RELEASE == 'true' }}
+        run: |
+          npm run development &
+
+      - name: Get repository name
+        run: echo "REPOSITORY_NAME=${GITHUB_REPOSITORY#*/}" >> $GITHUB_ENV
+        
+        
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build and push Docker DEV
+        uses: docker/build-push-action@v4
+        if: ${{ env.IS_RELEASE != 'true' }}
+        with:
+          context: hw-exceptions
+          username: ${{ secrets.JFROG_USER }}
+          password: ${{ secrets.JFROG_KEY }}
+          registry: "mycompany-docker-dev.jfrog.io"
+          #repository: hw/${{ inputs.DOCKER_IMAGENAME}}
+          file: ${{ inputs.DOCKERFILE_PATH }}/Dockerfile
+          #secrets: |
+           # "github_token=${{ secrets.GITHUB_TOKEN }}"
+          push: true
+          tags: ${{ github.sha }}
+
+      # get latest release from repo
+      - name: Get latest release
+        if: ${{ env.IS_RELEASE == 'true' }}
+        uses: actions/github-script@v6.2.0
+        id: current-version
+        with:
+          result-encoding: string
+          script: |
+            try {
+              release = await github.rest.repos.getLatestRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              })
+            } catch (error) {
+              core.setFailed(error.message)
+            }
+            let VERSION = release.data.tag_name;
+            if (! (/^([v])\d{1,2}\.\d{1,2}\.\d{1,2}$/.test(VERSION))) {
+              core.setFailed('VERSION MUST BE IN FORMAT vXX.XX.XX where X is 0-9!')
+            }
+            let RELEASE_TAG = VERSION.replace('v','');
+            return RELEASE_TAG;
+
+      - name: Set build tag
+        id: build-tag
+        run: |
+          echo "TAG=${{ github.sha }}" >> "${GITHUB_OUTPUT}"
+          if [ ${IS_RELEASE} == 'true' ]; then
+            echo "TAG=${{steps.current-version.outputs.result}}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # TO-DO: docker/build-push-action@v1 has node deprecation
+      - name: Build and push Docker PROD
+        uses: docker/build-push-action@v1
+        if: ${{ env.IS_RELEASE == 'true' }}
+        with:
+          username: ${{ secrets.JFROG_USER }}
+          password: ${{ secrets.JFROG_KEY }}
+          registry: 'mycompany-docker-prod.jfrog.io'
+          repository: hw/${{ env.REPOSITORY_NAME }}
+          path: ${{ inputs.DOCKERFILE_PATH }}
+          push: true
+          tags: ${{steps.build-tag.outputs.TAG}}
+
+      - name: clean up
+        if: always()
+        run: |
+          rm -f ~/.docker/config.json
+
+      - name: Clean up .npmrc
+        if: always()
+        run: |
+          rm -f .npmrc
