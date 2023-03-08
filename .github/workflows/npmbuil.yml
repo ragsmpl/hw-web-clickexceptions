@@ -102,14 +102,13 @@ jobs:
         with:
           node-version: ${{ inputs.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: '**/package-lock.json'
+          #cache-dependency-path: '**/package-lock.json'
 
       - name: NPM install
         run: |
           npm install
           npm i -D puppeteer
           npm install -g --force nodemon
-          npm install -g grunt-cli && npm install -g grunt
 
       - name: NPM test
         env:
