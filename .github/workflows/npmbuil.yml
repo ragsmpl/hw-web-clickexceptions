@@ -129,7 +129,6 @@ jobs:
       - name: Get repository name
         run: echo "REPOSITORY_NAME=${GITHUB_REPOSITORY#*/}" >> $GITHUB_ENV
         
-      - uses: actions/checkout@v3 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
         
@@ -148,8 +147,8 @@ jobs:
           file: hw-clickexceptions/Dockerfile
           #secrets: |
            # "github_token=${{ secrets.GITHUB_TOKEN }}"
-          push: true
-          tags: ${{ github.sha }}
+          push: false
+          #tags: ${{ github.sha }}
 
       # get latest release from repo
       - name: Get latest release
